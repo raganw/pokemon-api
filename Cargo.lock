@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "planetscale-csv-upload"
+name = "upload-pokemon-data"
 version = "0.1.0"
