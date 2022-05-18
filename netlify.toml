@@ -3,7 +3,7 @@ directory = "functions/"
 
 [build]
 command = """
-mkdir functions &&
+mkdir -p functions &&
 cargo build --release --bin pokemon-api &&
 cp target/release/pokemon-api functions/
 """
