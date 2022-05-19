@@ -11,12 +11,14 @@ use serde::{Serialize};
 use serde_json::json;
 use sqlx::{mysql::MySqlPoolOptions, MySql, Pool};
 use once_cell::sync::OnceCell;
+use tracing_subscriber;
+use tracing::instrument;
 
 static POOL: OnceCell<Pool<MySql>> = OnceCell::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    println!("cold start");
+    tracing_subscriber::fmt::init();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = MySqlPoolOptions::new()
         .max_connections(5)
@@ -34,12 +36,11 @@ struct PokemonHp {
     hp: u16,
 }
 
+#[instrument]
 async fn handler(
     event: ApiGatewayProxyRequest,
     _: Context,
 ) -> Result<ApiGatewayProxyResponse, Error> {
-    println!("handler");
-
     let path = event.path.expect("expect there to always be an event path");
     let requested_pokemon = path.split("/").last();
 
