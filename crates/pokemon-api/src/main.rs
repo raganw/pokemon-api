@@ -8,6 +8,7 @@ use aws_lambda_events::{
 use http::header::HeaderMap;
 use lambda_runtime::{handler_fn, Context, Error};
 use serde::{Serialize};
+use serde_json::json;
 use sqlx::mysql::MySqlPoolOptions;
 
 #[tokio::main]
@@ -25,34 +26,56 @@ struct PokemonHp {
 }
 
 async fn handler(
-    _: ApiGatewayProxyRequest,
+    event: ApiGatewayProxyRequest,
     _: Context,
 ) -> Result<ApiGatewayProxyResponse, Error> {
     println!("handler");
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    let pool = MySqlPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
+    let path = event.path.expect("expect there to always be an event path");
+    let requested_pokemon = path.split("/").last();
 
-    let result = sqlx::query_as!(
+    match requested_pokemon {
+        Some("") => {
+            let error_message = serde_json::to_string(&json!({
+                "error": "searched for empty pokemon"
+            }))?;
+            let response = ApiGatewayProxyResponse {
+                status_code: 400,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(error_message)),
+                is_base64_encoded: Some(false),
+            };
+            Ok(response)
+        },
+        None => panic!("requested_pokemon is None, which should never happen"),
+        Some(pokemon_name) => {
+            let pool = MySqlPoolOptions::new()
+                .max_connections(5)
+                .connect(&database_url)
+                .await?;
+
+            let result = sqlx::query_as!(
         PokemonHp,
-        r#"SELECT name, hp FROM pokemon WHERE slug = "bulbasaur""#
+        r#"SELECT name, hp FROM pokemon WHERE slug = ?"#,
+        pokemon_name
     )
-        .fetch_one(&pool)
-        .await?;
+                .fetch_one(&pool)
+                .await?;
 
-    let json_pokemon = serde_json::to_string(&result)?;
+            let json_pokemon = serde_json::to_string(&result)?;
 
-    let response = ApiGatewayProxyResponse {
-        status_code: 200,
-        headers: HeaderMap::new(),
-        multi_value_headers: HeaderMap::new(),
-        body: Some(Body::Text(json_pokemon)),
-        is_base64_encoded: Some(false),
-    };
-    Ok(response)
+            let response = ApiGatewayProxyResponse {
+                status_code: 200,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(json_pokemon)),
+                is_base64_encoded: Some(false),
+            };
+            Ok(response)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -69,12 +92,50 @@ mod tests {
 
     #[tokio::test]
     async fn handler_handles() {
-        let event = ApiGatewayProxyRequest {
+        let event = fake_request("/api/pokemon/bulbasaur"
+            .to_string());
+
+        assert_eq!(
+            handler(event.clone(), Context::default())
+                .await
+                .unwrap(),
+            ApiGatewayProxyResponse {
+                status_code: 200,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(serde_json::to_string(&PokemonHp {
+                    name: "Bulbasaur".to_string(),
+                    hp: 45,
+                }).unwrap())),
+                is_base64_encoded: Some(false),
+            }
+        )
+    }
+
+    #[tokio::test]
+    async fn handler_handles_empty_pokemon() {
+        let event = fake_request("/api/pokemon//".to_string());
+
+        assert_eq!(
+            handler(event.clone(), Context::default())
+                .await
+                .unwrap(),
+            ApiGatewayProxyResponse {
+                status_code: 400,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(serde_json::to_string(&json!({
+                    "error": "searched for empty pokemon"
+                })).unwrap())),
+                is_base64_encoded: Some(false),
+            }
+        )
+    }
+
+    fn fake_request(path: String) -> ApiGatewayProxyRequest {
+        ApiGatewayProxyRequest {
             resource: None,
-            path: Some(
-                "/.netlify/functions/pokemon-api"
-                    .to_string(),
-            ),
+            path: Some(path),
             http_method: Method::GET,
             headers: HeaderMap::new(),
             multi_value_headers: HeaderMap::new(),
@@ -117,22 +178,6 @@ mod tests {
             },
             body: None,
             is_base64_encoded: Some(false),
-        };
-
-        assert_eq!(
-            handler(event.clone(), Context::default())
-                .await
-                .unwrap(),
-            ApiGatewayProxyResponse {
-                status_code: 200,
-                headers: HeaderMap::new(),
-                multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Text(serde_json::to_string(&PokemonHp {
-                    name: "Bulbasaur".to_string(),
-                    hp: 45,
-                }).unwrap())),
-                is_base64_encoded: Some(false),
-            }
-        )
+        }
     }
 }
