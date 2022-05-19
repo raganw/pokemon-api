@@ -11,5 +11,5 @@ publish = "crates"
 
 [[redirects]]
 from = "/api/pokemon/:slug"
-to = "/.netflify/functions/pokemon-api"
+to = "/.netlify/functions/pokemon-api"
 status = 200
