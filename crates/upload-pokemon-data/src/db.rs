@@ -2,7 +2,19 @@ use std::fmt;
 use ksuid::Ksuid;
 use crate::pokemon_csv::PokemonCsv;
 use inflector::Inflector;
-use sqlx::{mysql::MySqlTypeInfo, database::HasArguments, encode::IsNull, Encode, MySql, MySqlPool, Database, Type};
+use serde::{Serialize, Serializer};
+use sqlx::{
+    mysql::MySqlTypeInfo,
+    database::{HasArguments, HasValueRef},
+    encode::IsNull,
+    Decode,
+    Encode,
+    MySql,
+    MySqlPool,
+    Database,
+    Type,
+};
+use sqlx::error::BoxDynError;
 
 #[derive(Debug, Clone)]
 pub struct PokemonTableRow {
@@ -59,6 +71,10 @@ pub struct PokemonId(Ksuid);
 impl PokemonId {
     pub fn new() -> Self {
         PokemonId(Ksuid::generate())
+    }
+
+    pub fn from_base62(base62: String) -> std::io::Result<Self> {
+        Ok(PokemonId(Ksuid::from_base62(&base62).unwrap()))
     }
 }
 
@@ -318,4 +334,19 @@ pub async fn insert_pokemon(
         steel_attack_effectiveness,
         fairy_attack_effectiveness,
     ).execute(&pool).await
+}
+
+impl<'r> Decode<'r, MySql> for PokemonId {
+    fn decode(value: <MySql as HasValueRef<'r>>::ValueRef) -> Result<PokemonId, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let value = <&[u8] as Decode<MySql>>::decode(value)?;
+        let base62_ksuid = std::str::from_utf8(value)?;
+        Ok(PokemonId(Ksuid::from_base62(base62_ksuid)?))
+    }
+}
+
+impl Serialize for PokemonId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        let id = self.0.to_base62();
+        serializer.serialize_str(&id)
+    }
 }

@@ -12,7 +12,8 @@ use serde_json::json;
 use sqlx::{mysql::MySqlPoolOptions, MySql, Pool};
 use once_cell::sync::OnceCell;
 use tracing_subscriber;
-use tracing::instrument;
+use tracing::{error, info, instrument};
+use upload_pokemon_data::PokemonId;
 
 static POOL: OnceCell<Pool<MySql>> = OnceCell::new();
 
@@ -32,8 +33,10 @@ async fn main() -> Result<(), Error> {
 
 #[derive(Debug, sqlx::FromRow, Serialize)]
 struct PokemonHp {
+    id: PokemonId,
     name: String,
     hp: u16,
+    legendary_or_mythical: bool,
 }
 
 #[instrument]
@@ -46,6 +49,7 @@ async fn handler(
 
     match requested_pokemon {
         Some("") => {
+            error!("searched for empty pokemon");
             let error_message = serde_json::to_string(&json!({
                 "error": "searched for empty pokemon"
             }))?;
@@ -57,13 +61,23 @@ async fn handler(
                 is_base64_encoded: Some(false),
             };
             Ok(response)
-        },
+        }
         None => panic!("requested_pokemon is None, which should never happen"),
         Some(pokemon_name) => {
-
+            info!(pokemon_name, "request a pokemon");
             let result = sqlx::query_as!(
         PokemonHp,
-        r#"SELECT name, hp FROM pokemon WHERE slug = ?"#,
+        r#"
+SELECT
+    id as "id!: PokemonId",
+    name,
+    hp,
+    legendary_or_mythical as "legendary_or_mythical!: bool"
+FROM
+    pokemon
+WHERE
+    slug = ?
+    "#,
         pokemon_name
     )
                 .fetch_one(POOL.get().unwrap())
@@ -115,8 +129,10 @@ mod tests {
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
                 body: Some(Body::Text(serde_json::to_string(&PokemonHp {
+                    id: PokemonId::from_base62("29ISIp6hBLXIfseV9Kc9mFeJX9I".to_string()).unwrap(),
                     name: "Bulbasaur".to_string(),
                     hp: 45,
+                    legendary_or_mythical: false,
                 }).unwrap())),
                 is_base64_encoded: Some(false),
             }
